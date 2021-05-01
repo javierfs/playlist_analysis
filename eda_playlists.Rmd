@@ -3,11 +3,25 @@ title: "Exploratory data analysis"
 author: "Javier Fernandez"
 date: "4/12/2021"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+library(dplyr)
+library(patchwork)
+library(ggrepel)
+library(directlabels)
+library(ggbeeswarm)
+library(ggjoy)
+library(ggExtra)
+library(funModeling)
+library(purrr)
 ```
+
 
 ## R Markdown
 
@@ -15,11 +29,401 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
-```{r cars}
-summary(cars)
+```{r read data}
+data <- read_csv(here('data','playlists_data.csv'))
+
+summary(data) %>% 
+```
+Profiling Numerical Variables
+
+```{r profiling data}
+profiling_num(data)
+```
+How numerical data is distributed?
+
+```{r some eda}
+data_numeric <- data %>% 
+                keep(is.numeric)
+
+data_numeric%>% 
+  filter(streams<201)%>% 
+  ggplot(aes(x=streams)) +
+  geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+  scale_x_continuous(breaks=seq(1, 200, 15), limits = c(0, 200))+
+  theme_minimal()
+
+data_numeric%>% 
+  filter(stream30s<115)%>% 
+  ggplot(aes(x=stream30s)) +
+  geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+  scale_x_continuous(breaks=seq(1, 115, 5), limits = c(0, 115))+
+  theme_minimal()
+
+data_numeric%>% 
+  mutate(ratio_durable_streamings= stream30s/streams) %>%
+  ggplot(aes(x=ratio_durable_streamings)) +
+  geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+  scale_x_continuous(breaks=seq(0, 1, 0.1), limits = c(0, 1))+
+  theme_minimal()
+
+
+data_numeric%>% 
+  mutate(ratio_durable_streamings= stream30s/streams) %>%
+  ggplot(aes(x=ratio_durable_streamings)) +
+  scale_x_continuous(breaks=seq(0, 1, 0.1), limits = c(0, 1))+
+  stat_ecdf(geom = "step")+
+  labs(y = "CDF( % durable streamings)", 
+       x="% durable streamings")+
+  theme_minimal()+
+  theme(
+  axis.text.x = element_text(size = 8),
+  axis.title.y = element_text(size = 12))
+
+data_numeric%>% 
+  ggplot(aes(x=dau)) +
+  scale_x_continuous(breaks=seq(0, 15, 1), limits = c(0, 15))+
+  stat_ecdf(geom = "step")+
+  labs(y = "CDF(DAU)", 
+       x="DAU")+
+  theme_minimal()+
+  theme(
+  axis.text.x = element_text(size = 8),
+  axis.title.y = element_text(size = 10))
+
+
+data_numeric%>% 
+  ggplot(aes(x=monthly_stream30s)) +
+  #stat_ecdf(geom = "step")+
+  geom_histogram(binwidth=10, colour="black", fill="white")+
+  scale_x_continuous(limits = c(0, 300),  breaks = seq(0, 300, by = 10))+
+  scale_y_continuous(limits = c(0, 50000),  breaks = seq(0, 50000, by = 5000))+
+  labs(y = "Number of playlists", 
+       x="Monthly streams")+
+  theme_minimal()+
+  theme(
+  axis.text.x = element_text(size = 8),
+  axis.title.y = element_text(size = 10))
+#min(boxplot.stats(data_numeric$streams)$out)
+
+
+
+```
+Cleaning numerical data and creating new metrics
+```{r some cleaning}
+
+data_numeric%>% 
+  mutate(ratio_durable_streamings= stream30s/streams,
+         mau_engagement=mau_both_months/mau) 
+
+data_numeric%>% 
+  filter(stream30s<=streams)%>%
+  summarise(n())
+
+data_numeric%>% 
+  filter(monthly_stream30s>=monthly_owner_stream30s)%>%
+  summarise(n())
+
+data_numeric%>% 
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s)%>%
+  filter(monthly_stream30_followers<10)%>%
+  summarise(count_percent = (n()/403366)*100,
+            n())
+
+data%>% 
+  group_by(owner)%>% 
+  summarise(count=n())%>%
+  arrange(desc(count))
+
+
+
+data_numeric_cleaned_metrics <- data_numeric %>% 
+                          mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s,
+                                 mau_engagement=replace_na(mau_both_months*100/mau_previous_month,0),
+                                 ratio_durable_streamings=replace_na(stream30s*100/streams,0)
+                                 ) %>%
+                                filter(users>3) %>%
+                                select(monthly_stream30s,-monthly_owner_stream30s)
+
+
+
+
+profiling_num(data_numeric_cleaned_metrics)
 ```
 
+
+
+```{r streams}
+data_numeric%>% 
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s)%>%
+  ggplot(aes(x=monthly_stream30_followers)) +
+  #stat_ecdf(geom = "step")+
+  geom_histogram(binwidth=10, boundary = 0, color="black", fill="#20D760")+
+  scale_x_continuous(expand = expansion(mult = c(0,0)),
+                     limits = c(-5,300), 
+                     breaks = seq(0,300,10)
+                     )+
+  scale_y_continuous(expand = expansion(mult = c(0,0)),
+                     limits = c(0,150000),
+                     breaks = seq(0,150000,20000))+
+  labs(y = "Number of Playlists", 
+       x="Monthly streams >30s of followers")+
+  theme_minimal()+
+  theme(
+  axis.text.x = element_text(size = 8),
+  axis.title.y = element_text(size = 10))
+```
+
+```{r streams montlhy percent}
+data_numeric%>% 
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s)%>%
+  ggplot(aes(x=monthly_stream30_followers)) +
+  aes(y=stat(count)/sum(stat(count))) + 
+  geom_histogram(binwidth=10, boundary = 0, color="black", fill="#20D760")+
+  scale_x_continuous(expand = expansion(mult = c(0,0)),
+                     limits = c(-5,300), 
+                     breaks = seq(0,300,10)
+                     )+
+  scale_y_continuous(labels = scales::percent)+
+  labs(y = "Number of Playlists", 
+       x="Monthly streams >30s of followers")+
+  theme_minimal()+
+  theme(
+  axis.text.x = element_text(size = 8),
+  axis.title.y = element_text(size = 10))
+```
+
+
+
+
+```{r Monthly Active Users}
+
+
+data_numeric%>% 
+  ggplot(aes(x=mau)) +
+  geom_histogram(binwidth=3, boundary = 0,closed = "left", color="black", fill="#20D760")+
+  aes(y=stat(count)/sum(stat(count))) + 
+  scale_x_continuous(expand = expansion(mult = c(0,0)),
+                     limits = c(-5,50), 
+                     breaks = seq(0,50,3),
+                     labels = seq(0,50,3)
+                     )+
+  scale_y_continuous(labels = scales::percent)+
+  labs(y = "Number of Playlists", 
+       x="MAU")+
+  theme_minimal()+
+  theme(
+  axis.text.x = element_text(size = 8),
+  axis.title.y = element_text(size = 10))
+
+
+data_numeric%>% 
+  filter(mau<3)%>%
+  summarise(count_percent = (n()/403366)*100,
+            n())
+```
+
+Let's apply PCA! 
+
+
+```{r applying PCA}
+library("factoextra")
+pca_numeric <- prcomp(data_numeric, scale = TRUE)
+names(pca_numeric)
+pca_numeric
+summary(pca_numeric)
+fviz_eig(pca_numeric, addlabels = TRUE, ylim = c(0, 80))
+```
+
+```{r applying pca with cos2}
+OS <- c(0,0,0,0,1,0,0,0,1,1,0,1,1,1,1,1)
+library(ggbiplot)
+
+var <- get_pca_var(pca_numeric)
+
+
+fviz_pca_var(pca_numeric, col.var = "black")
+# Color by cos2 values: quality on the factor map
+fviz_pca_var(pca_numeric, col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE, # Avoid text overlapping,
+             alpha.var = "cos2"
+             )
+
+```
+
+
+
+```{r pressure, applying pca with dimension correlations}
+
+library("corrplot")
+corrplot(var$cos2, is.corr=FALSE)    
+
+```
+```{r cosseno dim1-2}
+# Total cos2 of variables on Dim.1 and Dim.2
+fviz_cos2(pca_numeric, choice = "var", axes = 1:2)
+```
+```{r contributions to dime1}
+# Total cos2 of variables on Dim.1 and Dim.2
+# Contributions of variables to PC1
+fviz_contrib(pca_numeric, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(pca_numeric, choice = "var", axes = 2, top = 10)
+```
+```{r contribution in two dimntsions}
+fviz_pca_var(pca_numeric, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE
+             )
+```
+
+
+```{r autoplot PCA}
+
+pca_numeric %>% 
+  ggbiplot(obs.scale = 1, var.scale = 1)+
+  scale_color_discrete(name = '') +
+  theme_minimal()
+
+library(ggfortify)
+library(ggrepel)
+library(plotly)
+# Set it globally:
+options(ggrepel.max.overlaps = Inf)
+
+g <- autoplot(object = pca_numeric, loadings = TRUE, loadings.colour = 'blue', loadings.label.repel = TRUE,loadings.label.size = 3, scale=0 )
+g
+
+```
+
+```{r Sentiment Analysis}
+library(sentimentr)
+library(stringr) 
+
+playlist_sentiments <- data %>%
+                       mutate(sentences = get_sentences(tokens)) %>%
+                       sentiment(sentences)
+
+mytext <- c(
+    'do you like it?  But I hate really bad dogs',
+    'I am the best friend.',
+    'Do you really like it?  I\'m not a fan'
+)
+mytext
+
+
+data_tokens<- data %>% 
+              mutate(tokens_clean= gsub("_x|\\.\\d+[A-Za-z]+", "", sample))
+              str_replace(tokens,'"["', '') %>%
+              select(tokens)
+                       
+  
+
+
+
+
+lapply(data$tokens, function(x) noquote(str_replace(x, '["\\[\\]]', ''))[[1]][-1])
+
+str_split(data$tokens, '[\\["\\]]')[[1]]
+str_replace(data$tokens,'\"',' ')
+
+mytext <- get_sentences(gsub('\\d|\U{FFFFFFFF}|\U3e33613c|\U3e63613c|\\[|\\]|\u00f1a', '', enc2utf8(data$tokens))) 
+typeof(mytext)
+
+sentences <-  get_sentences(gsub('\\d|\U{FFFFFFFF}|\U3e33613c|\U3e63613c|\\[|\\]|\u00f1a', '',  enc2utf8(data$tokens)))
+
+
+sentiments <- sentiment_by(sentences, list(data$playlist_uri, enc2utf8(data$tokens)))  
+sentiments %>% arrange(desc(ave_sentiment))
+
+emotions <- emotion_by(sentences, list(data$playlist_uri, enc2utf8(data$tokens)))  
+emotions %>% arrange(desc(ave_emotion))
+
+sentiments_idx <- sentiments %>% 
+  rename(tokens_count = word_count) %>%
+  select(-`tokens)`, -sd)
+
+data_with_sentiment_score <-
+inner_join(sentiments_idx, data, by='playlist_uri')
+
+
+
+data_with_sentiment_score %>% 
+  #group_by(mood_1) %>%
+  #summarise(average_mood_sentiment_score = mean(ave_sentiment, na.rm=TRUE)) %>%
+  #arrange(desc(average_mood_sentiment_score)) %>%
+  ggplot(aes(x=mood_1, y=ave_sentiment)) + 
+  geom_boxplot(fill="#20D760",alpha = 0.05)+
+  #geom_point(stat='identity', size=1)  +
+  #geom_segment(aes(x=mood_1, 
+  #                 xend=mood_1, 
+  #                 y=0, 
+  #                 yend=average_mood_sentiment_score)) +
+  labs(title="Boxplots of the average sentiment", 
+       subtitle="Grouped by leading mood",
+       x='',
+       y='Average sentiment') + 
+  theme_minimal()+
+  scale_y_continuous(limits = c(-2.5,2.5),
+                      breaks = seq(-2.5,2.5,0.5))+ 
+  coord_flip()
+
+  
+
+
+
+
+
+
+sentiment_by(mytext)
+
+
+mytext <- get_sentences(mytext)
+mytext
+
+```
+
+```{r pressure, echo=FALSE}
+data_with_sentiment_score %>% 
+  #group_by(mood_1) %>%
+  #summarise(average_mood_sentiment_score = mean(ave_sentiment, na.rm=TRUE)) %>%
+  #arrange(desc(average_mood_sentiment_score)) %>%
+  ggplot(aes(x=mood_1, y=tokens_count)) + 
+  geom_boxplot(fill="#20D760",alpha = 3)+
+  #geom_point(stat='identity', size=1)  +
+  #geom_segment(aes(x=mood_1, 
+  #                 xend=mood_1, 
+  #                 y=0, 
+  #                 yend=average_mood_sentiment_score)) +
+  labs(title="Boxplots of the number of tokens", 
+       subtitle="Grouped by leading mood",
+       x='',
+       y='Number of tokens') + 
+  theme_minimal()+
+  ylim(0, 5) +
+  coord_flip()
+
+
+```
+
+
+```{r pressure, echo=FALSE getting number of genres}
+# data_with_sentiment_score %>%
+  rowwise() %>%
+  mutate(number_genres = sum(c_across(genre_1:genre_3) != "-"),
+         number_moods =  sum(c_across(mood_1:mood_3) != "-")) %>%
+  ungroup() %>%
+  select(genre_1:genre_3, number_genres, mood_1:mood_3, number_moods ) %>%
+  count(number_genres, sort = TRUE)
+```
+
+
+
 ## Including Plots
+
+
+
+
 
 You can also embed plots, for example:
 
