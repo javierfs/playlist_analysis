@@ -1,0 +1,190 @@
+---
+title: "followers_analysis_dim_reduction"
+author: "Javier Fernandez"
+date: "5/1/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = TRUE, warning = FALSE, message = FALSE, 
+                      echo = TRUE, dpi = 300, cache.lazy = FALSE,
+                      tidy = "styler", fig.width = 8, fig.height = 5)
+library(knitr)
+library(scales)
+library(tidyverse)
+library(here)
+library(dplyr)
+library(patchwork)
+library(ggrepel)
+library(directlabels)
+library(ggbeeswarm)
+library(ggjoy)
+library(ggExtra)
+library(funModeling)
+library(purrr)
+library(skimr)
+library(sentimentr)
+library(stringr) 
+
+```
+
+## Loading data
+
+```{r}
+data <- read_csv(here('data','playlists_data.csv'))
+#skim(data)
+```
+
+## Let's do a little exploration!
+
+```{r}
+
+data %>% 
+  filter(owner=='spotify') %>% 
+  ggplot(aes(monthly_owner_stream30s)) +
+  geom_histogram()
+
+data %>% 
+  count(genre_1, 
+        sort=TRUE)
+data %>% 
+  count(mood_1
+        , sort=TRUE)
+
+
+
+data %>% 
+rowwise() %>%
+  mutate(number_genres = sum(c_across(genre_1:genre_3) != "-"),
+         number_moods =  sum(c_across(mood_1:mood_3) != "-")) %>%
+  ungroup() %>%
+  select(genre_1:genre_3, number_genres, mood_1:mood_3, number_moods ) %>%
+  count(number_genres, sort = TRUE)
+
+# Sentiment analysis
+sentences <-  get_sentences(gsub('\\d|\U{FFFFFFFF}|\U3e33613c|\U3e63613c|\\[|\\]|\u00f1a', '',  enc2utf8(data$tokens)))
+sentiments <- sentiment_by(sentences, list(data$playlist_uri, enc2utf8(data$tokens))) 
+
+sentiments_idx <- sentiments %>% 
+  rename(tokens_count = word_count) %>%
+  select(-`tokens)`, -sd)
+
+data_with_sentiment_score <-
+inner_join(sentiments_idx, data, by='playlist_uri')
+
+
+data_with_sentiment_score %>% 
+  rowwise() %>%
+  mutate(number_genres = sum(c_across(genre_1:genre_3) != "-"),
+       number_moods =  sum(c_across(mood_1:mood_3) != "-")) %>%
+  ungroup() 
+  
+
+
+  
+```
+
+
+```{r}
+data %>% 
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s,
+         mau_engagement=replace_na(mau_both_months*100/mau_previous_month,0),
+         ratio_durable_streamings=replace_na(stream30s*100/streams,0)
+         ) %>%
+  filter(mau>3) %>%
+  select(monthly_stream30_followers) %>% 
+  ggplot(aes(x = factor(1), y = log10(monthly_stream30_followers)))+
+  geom_boxplot(width = 0.4, fill = "white") +
+  geom_jitter(width = 0.1, size = 1)
+```
+
+
+#Feature Engineering: preparing the data
+Let's work on Long Term Successes: MAU
+```{r}
+data_long_term <- data %>% 
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s,
+         mau_engagement=replace_na(mau_both_months*100/mau_previous_month,0),
+         owner_type = case_when(owner == 'spotify' ~ 'spotify',
+                                TRUE ~ "created_by_user")
+         ) %>%
+  filter(mau>3,
+         monthly_stream30_followers < 3*10^7) %>%
+  rowwise() %>%
+  mutate(number_genres = sum(c_across(genre_1:genre_3) != "-"),
+       number_moods =  sum(c_across(mood_1:mood_3) != "-")) %>%
+  ungroup() %>% 
+  select(-genre_2,-genre_3,-mood_2, -mood_3, -monthly_stream30s, -monthly_owner_stream30s, n_local_tracks, -owner_country, -dau,-wau, -streams, -stream30s, -n_local_tracks)
+
+sentences <-  get_sentences(gsub('\\d|\U{FFFFFFFF}|\U3e33613c|\U3e63613c|\\[|\\]|\u00f1a', '',  enc2utf8(data_long_term$tokens)))
+sentiments <- sentiment_by(sentences, list(data_long_term$playlist_uri, enc2utf8(data_long_term$tokens))) 
+
+sentiments_idx <- sentiments %>% 
+  rename(tokens_count = word_count) %>%
+  select(-`tokens)`, -sd)
+
+data_cleaned <-
+inner_join(sentiments_idx, data_long_term, by='playlist_uri') %>% 
+  select(-tokens) %>% 
+  mutate_if(is.character, factor)
+
+#skim(data_cleaned)
+  
+  
+```
+
+
+```{r}
+data_cleaned %>% 
+ ggplot(aes(x=monthly_stream30_followers)) +
+  aes(y=stat(count)/sum(stat(count))) + 
+  geom_histogram(binwidth=50, boundary = 0, color="black", fill="#20D760")+
+  scale_x_continuous(expand = expansion(mult = c(0,0)),
+                     limits = c(-5,500), 
+                     breaks = seq(0,500,50)
+                     )+
+  scale_y_continuous(labels = scales::percent)+
+  labs(y = "Number of Playlists", 
+       x="Monthly streams >30s of followers")+
+  theme_minimal()+
+  theme(
+  axis.text.x = element_text(size = 8),
+  axis.title.y = element_text(size = 10))
+
+data_cleaned %>% 
+  filter(monthly_stream30_followers>500)%>%
+  summarise(count_percent = (n()/102891)*100,
+            n())
+
+```
+
+
+
+```{r}
+library(embed)
+library(recipes)
+
+data_super_cleaned <- data_cleaned %>% filter(monthly_stream30_followers>500)
+
+normalized_features <- recipe(~., data = data_super_cleaned) %>%
+  update_role(playlist_uri, owner, new_role = "id") %>%
+  step_corr(all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_numeric()) %>%
+  step_normalize(all_predictors()) %>% 
+  prep() %>% 
+  juice()
+  #step_umap(all_predictors()) 
+
+umap_prep <- prep(umap_rec)
+  
+
+
+  
+```
+
+
+
+
