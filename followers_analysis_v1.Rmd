@@ -154,7 +154,7 @@ data_cleaned %>%
   axis.title.y = element_text(size = 10))
 
 data_cleaned %>% 
-  filter(monthly_stream30_followers>500)%>%
+  filter(monthly_stream30_followers>7000)%>%
   summarise(count_percent = (n()/102891)*100,
             n())
 
@@ -166,25 +166,305 @@ data_cleaned %>%
 library(embed)
 library(recipes)
 
-data_super_cleaned <- data_cleaned %>% filter(monthly_stream30_followers>500)
+#data_super_cleaned <- data_cleaned %>% filter(monthly_stream30_followers>7000)
 
-normalized_features <- recipe(~., data = data_super_cleaned) %>%
+umap_rec <- recipe(~., data = data_cleaned) %>%
   update_role(playlist_uri, owner, new_role = "id") %>%
   step_corr(all_numeric()) %>%
-  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -has_role("id")) %>%
   step_zv(all_numeric()) %>%
   step_normalize(all_predictors()) %>% 
-  prep() %>% 
-  juice()
-  #step_umap(all_predictors()) 
+  step_umap(all_predictors()) 
 
 umap_prep <- prep(umap_rec)
   
+umap_prep %>% juice()
 
 
+
+bake(umap_prep, new_data = NULL) %>%
+  ggplot(aes(umap_1, umap_2)) +
+  geom_point(color = "midnightblue", alpha = 0.3, size = 0.5) +
+ # geom_text(check_overlap = TRUE, hjust = "inward", family = "IBMPlexSans") +
+  labs(color = NULL)
   
+
+
+hdb <- bake(umap_prep, new_data = NULL) %>%
+  select(umap_1, umap_2) %>% 
+  hdbscan(minPts = 50)
+
+
+
+
+# Modeling packages
+library(mclust)   # for fitting clustering algorithms
+# Apply GMM model with 3 components
+data_mc <- Mclust(umap_prep %>% juice() %>% select(umap_1, umap_2), G = 7)
+
+# Plot results
+plot(data_mc, what = "density")
+plot(data_mc, what = "uncertainty")
+
+data_optimal_mc <- Mclust(umap_prep %>% juice() %>% select(umap_1, umap_2))
+legend_args <- list(x = "bottomright", ncol = 5)
+plot(data_optimal_mc, what = 'BIC', legendArgs = legend_args)
+plot(data_optimal_mc, what = 'classification')
+plot(data_optimal_mc, what = 'uncertainty')
+
+
+data_optimal_mc %>% mutate(cluster=classification)
+
+umap_prep %>% juice() %>% mutate(cluster=data_optimal_mc$classification,
+                                 uncertainty=data_optimal_mc$uncertainty)
+
+
+
+uncertainty <- data.frame(
+  id = 1:nrow(umap_prep %>% juice()),
+  cluster = data_optimal_mc$classification,
+  uncertainty = data_optimal_mc$uncertainty
+)
+
+uncertainty %>%
+  group_by(cluster) %>%
+  filter(uncertainty > 0.25) %>%
+  ggplot(aes(uncertainty, reorder(id, uncertainty))) +
+  geom_point() +
+  facet_wrap(~ cluster, scales = 'free_y', nrow = 1)
+
+
 ```
 
 
+
+# Grid Search of parameters 
+```{r}
+n_neighbors <- c(15,30,50,100,150)
+min_distance <- c( 0.001, 0.003, 0.009,0.03,0.09)
+metrics <- c("euclidean" ,"cosine","hamming")
+
+umap_rec <- recipe(~., data = data_cleaned) %>%
+  update_role(playlist_uri, owner, new_role = "id") %>%
+  step_corr(all_numeric()) %>%
+  step_dummy(all_nominal(), -has_role("id")) %>%
+  step_zv(all_numeric()) %>%
+  step_normalize(all_predictors()) 
+  
+
+
+
+
+data_embs <- data_cleaned #copy of the data
+for (nn in n_neighbors) {
+ for (md in min_distance) {
+  for (metr in metrics) {
+    umap_prep <- umap_rec %>% step_umap(all_predictors(),
+                           neighbors = nn,
+                           min_dist = md,
+                           options = list(metric = metr,
+                                          verbose = TRUE, 
+                                          n_threads = 1)) %>% prep()
+     umap_embedding <- umap_prep %>% juice() 
+  data_embs <- data_embs %>% 
+  bind_cols(umap_embedding['umap_1'] %>% as_tibble() ) %>% 
+  bind_cols(umap_embedding['umap_2'] %>% as_tibble() ) 
+  names(data_embs)[names(data_embs) == 'umap_1' ] = paste('nn_',nn,'md_',md,'metric',metr,'1',sep = '.')
+  names(data_embs)[names(data_embs) == 'umap_2' ] = paste('nn_',nn,'md_',md,'metric',metr,'2',sep = '.')
+  }
+ }
+ 
+}
+
+
+
+```
+
+
+#Saving File
+
+```{r}
+write.csv(data_embs,here('data','playlists_embeds_trials.csv'), row.names = FALSE)
+```
+
+
+#Visualizing first example
+
+```{r}
+
+n_neighbors <- c(15,30,50,100,150)
+min_distance <- c( 0.001, 0.003, 0.009,0.03,0.09)
+metrics <- c("euclidean" ,"cosine","hamming")
+for (nn in n_neighbors) {
+ for (md in min_distance) {
+  for (metr in metrics) {
+data_embs %>%
+ ggplot(aes(x = data_embs[[paste('nn_',nn,'md_',md,'metric',metr,'1',sep = '.')]], 
+            y = data_embs[[paste('nn_',nn,'md_',md,'metric',metr,'2',sep = '.')]]
+            ))+
+ geom_point(size = 0.3,alpha =0.1) +
+ labs(x = "UMAP 1", y = "UMAP 2" ,
+    title = paste('UMAP Main Components: ', paste('nn_',nn,'md_',md,'metric',metr,sep = '.')))+
+  theme_bw() +
+   ggsave(here('umap_trials/',paste(paste('nn_',nn,'md_',md,'metric',metr,sep = '.'),'.png')),
+               height = 7, 
+               width = 8)
+  }
+ }
+ 
+}
+```
+
+
+
+#Applying GMM for clustering!
+
+```{r}
+# Modeling packages
+library(mclust)   # for fitting clustering algorithms
+# Apply GMM model with 3 components
+#data_mc <- Mclust(umap_prep %>% juice() %>% select(nn_.50.md_.0.09.metric.cosine.1, nn_.50.md_.0.09.metric.cosine.2), G = 7)
+
+# Plot results
+#plot(data_mc, what = "density")
+#plot(data_mc, what = "uncertainty")
+
+data_optimal_mc <- Mclust(data_embs %>% select(nn_.50.md_.0.09.metric.cosine.1, nn_.50.md_.0.09.metric.cosine.2))
+legend_args <- list(x = "bottomright", ncol = 5)
+plot(data_optimal_mc, what = 'BIC', legendArgs = legend_args)
+plot(data_optimal_mc, what = 'classification', legendArgs = list(x = "bottomright"))
+plot(data_optimal_mc, what = 'uncertainty')
+
+
+data_optimal_mc %>% mutate(cluster=classification)
+
+umap_prep %>% juice() %>% mutate(cluster=data_optimal_mc$classification,
+                                 uncertainty=data_optimal_mc$uncertainty)
+```
+
+
+
+
+#Testing
+
+```{r}
+#Visualising with the name of the clusters
+if(require("mclust")){
+# Compute model-based-clustering 
+require("mclust")
+
+# Visualize classification
+fviz_mclust(data_optimal_mc, "classification", geom = "point")
+}
+
+data_embs %>% select(nn_.50.md_.0.09.metric.cosine.1, nn_.50.md_.0.09.metric.cosine.2)
+
+components <- data_optimal_mc$data %>%  as_tibble()%>% mutate(clust=as.factor(data_optimal_mc$classification),
+                                 uncertainty=data_optimal_mc$uncertainty)
+library("viridis")
+components %>% ggplot(aes(x=nn_.50.md_.0.09.metric.cosine.1, 
+                          y=nn_.50.md_.0.09.metric.cosine.2, 
+                          color=ifelse(uncertainty < 30, clust,'gray'))) +
+  geom_point(alpha=0.3)+
+  scale_color_viridis(discrete = FALSE, option = "C")+
+  theme_minimal()
+
+ggplot(aes(x=var1,y=var2, color=ifelse(column_1 < 30, col_groups,'grey')))
+
+
+
+
+
+
+```
+
+
+```{r}
+
+data_cleaned_clusterized <- data_cleaned  #copy of data
+
+data_cleaned_clusterized <- data_cleaned_clusterized %>% 
+  mutate(clust = as.factor(data_optimal_mc$classification),
+         uncertainty = data_optimal_mc$uncertainty)
+  
+
+# Density plots cluster
+data_cleaned_clusterized %>% 
+  ggplot(aes(x=monthly_stream30_followers, y=clust, fill=clust))+
+  geom_joy(scale = 2, alpha=0.5) +
+  scale_y_discrete(expand=c(0.01, 0)) +
+  scale_x_continuous(limits = c(0, 300))+
+  labs(y=NULL,
+       x=NULL) +
+  theme_minimal()+
+  theme(legend.position="none")
+
+# Checking if there is any statistical differences between clusters
+# Monthly streams >30s followers
+library(ggstatsplot)
+data_cleaned_clusterized %>% filter(uncertainty<30) %>% 
+ggbetweenstats(
+  x = clust,
+  y = monthly_stream30_followers,
+  title = "Distribution of the monthly_stream30_followers across clusters "
+) + scale_y_continuous(limits = c(0,35000))
+  
+#owner type
+
+library(RColorBrewer)
+mycolors <- colorRampPalette(brewer.pal(9, "lancet"))(nb.cols)
+# Owner type
+data_cleaned_clusterized %>% filter(uncertainty<30) %>% 
+ggbarstats(
+  x = owner_type,
+  y = clust,
+  title = "Owner type by Cluster",
+  xlab = "cluster",
+  legend.title = "Owner type",
+  ggplot.component = list(ggplot2::scale_x_discrete(guide = ggplot2::guide_axis(n.dodge = 2))),
+  palette = "Paired"
+)
+
+
+library(WRS2) # for data
+library(afex) # to run anova
+
+
+
+library(scales)
+
+#mau_engagement
+data_cleaned_clusterized %>% 
+  filter(uncertainty<30) %>% 
+  mutate(mau_engagement_perc=mau_engagement/100) %>% 
+ggbetweenstats(
+  x = clust,
+  y = mau_engagement_perc,
+  title = "Distribution of the MAU_engagement across clusters ",
+  palette = "Paired" 
+) + scale_y_continuous(labels = scales::percent)
+
+#n_tracks
+data_cleaned_clusterized %>% 
+  filter(uncertainty<30) %>% 
+  ggbetweenstats(
+  x = clust,
+  y = n_artists,
+  title = "Distribution of the #Artist across clusters ",
+  palette = "Paired" 
+) + scale_y_continuous(limits = c(0,4500))
+
+
+
+```
+
+#Save important datasets
+
+```{r}
+write.csv(components,here('data','playlists_cleaned_mclust_optimal.csv'), row.names = FALSE)
+write.csv(data_cleaned_clusterized,here('data','playlists_cleaned_clusterized.csv'), row.names = FALSE)
+
+
+```
 
 
