@@ -435,28 +435,119 @@ library(scales)
 
 #mau_engagement
 data_cleaned_clusterized %>% 
-  filter(uncertainty<30) %>% 
+  filter(uncertainty<0.3) %>% 
   mutate(mau_engagement_perc=mau_engagement/100) %>% 
 ggbetweenstats(
   x = clust,
   y = mau_engagement_perc,
   title = "Distribution of the MAU_engagement across clusters ",
   palette = "Paired" 
-) + scale_y_continuous(labels = scales::percent)
+) + scale_y_continuous(labels = scales::percent) +
+   ggsave(here('data/exploratory','clusters_mau_engagement_certain.png'),
+               height = 7, 
+               width = 10)
 
-#n_tracks
+#n_artists
 data_cleaned_clusterized %>% 
-  filter(uncertainty<30) %>% 
+  filter(uncertainty<0.3) %>% 
   ggbetweenstats(
   x = clust,
   y = n_artists,
-  title = "Distribution of the #Artist across clusters ",
+  title = "Distribution of the #artists across clusters ",
   palette = "Paired" 
-) + scale_y_continuous(limits = c(0,4500))
+) + 
+  scale_y_continuous(limits = c(0,4500)) +
+   ggsave(here('data/exploratory','cluster_n_artists_certain.png'),
+               height = 7, 
+               width = 10)
+
+#n_tracks
+data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>% 
+  ggbetweenstats(
+  x = clust,
+  y = n_tracks,
+  title = "Distribution of the #tracks across clusters ",
+  palette = "Paired" 
+) + 
+  scale_y_continuous(limits = c(0,40000)) +
+    ggsave(here('data/exploratory','cluster_n_tracks_certain.png'),
+               height = 7, 
+               width = 10)
+
+#n_albums
+data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>% 
+  ggbetweenstats(
+  x = clust,
+  y = n_albums,
+  title = "Distribution of the #albums across clusters ",
+  palette = "Paired" 
+) + 
+  scale_y_continuous(limits = c(0,4700)) + 
+  ggsave(here('data/exploratory','cluster_n_albums_certain.png'),
+               height = 7, 
+               width = 10)
+
+#users
+data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>% 
+  ggbetweenstats(
+  x = clust,
+  y = users,
+  title = "Distribution of the #users across clusters ",
+  palette = "Paired" 
+) + 
+  scale_y_continuous(limits = c(0,121000)) + 
+  ggsave(here('data/exploratory','cluster_users_certain.png'),
+               height = 7, 
+               width = 10)
+
+#MAU
+data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>% 
+  ggbetweenstats(
+  x = clust,
+  y = mau,
+  title = "Distribution of the MAU across clusters ",
+  palette = "Paired" 
+) + 
+  scale_y_continuous(limits = c(0,50000)) + 
+  ggsave(here('data/exploratory','cluster_mau_certain.png'),
+               height = 7, 
+               width = 10)
+
+
+
+#MAU previous month
+data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>% 
+  ggbetweenstats(
+  x = clust,
+  y = mau_previous_month,
+  title = "Distribution of the MAU previous month across clusters",
+  palette = "Paired" 
+) + 
+  scale_y_continuous(limits = c(0,50000)) + 
+  ggsave(here('data/exploratory','cluster_mau_prev_month_certain.png'),
+               height = 7, 
+               width = 10)
+
+data_genre_1 <- data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>%
+  group_by(clust, genre_1) %>% 
+  summarise(count=n()) %>% 
+  mutate(percent = count*100/sum(count)) %>% 
+  arrange(clust, genre_1, percent) %>% View()
+  
+
 
 
 
 ```
+
+
+
 
 #Save important datasets
 
@@ -466,5 +557,356 @@ write.csv(data_cleaned_clusterized,here('data','playlists_cleaned_clusterized.cs
 
 
 ```
+
+
+#Example circular barplot
+
+```{r}
+# Set a number of 'empty bar' to add at the end of each group
+empty_bar <- 4
+to_add <- data.frame( matrix(NA, empty_bar*nlevels(data_genre_1$clust), ncol(data_genre_1)) )
+colnames(to_add) <- colnames(data_genre_1)
+to_add$clust <- rep(levels(data_genre_1$clust), each=empty_bar)
+data <- rbind(data_genre_1, to_add)
+data <- data %>% arrange(clust)
+data$id <- seq(1, nrow(data))
+ 
+# Get the name and the y position of each label
+label_data <- data
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (label_data$id-0.5) /number_of_bar     # I substract 0.5 because the letter must have the angle of the center of the bars. Not extreme right(1) or extreme left (0)
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+ 
+
+# prepare a data frame for base lines
+base_data <- data %>% 
+  group_by(clust) %>% 
+  summarise(start=min(id), 
+            end=max(id) - empty_bar) %>% 
+  rowwise() %>% 
+  mutate(title=mean(c(start, end)))
+
+  # prepare a data frame for grid (scales)
+grid_data <- base_data
+grid_data$end <- grid_data$end[ c( nrow(grid_data), 1:nrow(grid_data)-1)] + 1
+grid_data$start <- grid_data$start - 1
+grid_data <- grid_data[-1,]
+
+
+
+
+
+# Make the plot
+p <- ggplot(data, aes(x=as.factor(id), y=percent, fill=clust)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+  
+  geom_bar(stat="identity", alpha=0.5) + 
+ 
+  
+  # Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
+  geom_segment(data=grid_data, aes(x = end, y = 80, xend = start, yend = 80), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 60, xend = start, yend = 60), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 40, xend = start, yend = 40), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 20, xend = start, yend = 20), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  
+  # Add text showing the value of each 100/75/50/25 lines
+  annotate("text", x = rep(max(data$id),4), y = c(20, 40, 60, 80), label = c("20", "40", "60", "80") , color="grey", size=3 , angle=0, fontface="bold", hjust=1) +
+  
+  geom_bar(stat="identity", alpha=0.5) +
+  ylim(-100,120) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(-1,4), "cm") 
+  ) +
+  coord_polar() + 
+  geom_text(data=label_data, aes(x=id, y=percent+10, label=genre_1, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=2.5, angle= label_data$angle, inherit.aes = FALSE ) +
+  
+  # Add base line information
+  geom_segment(data=base_data, aes(x = start, y = -5, xend = end, yend = -5), colour = "black", alpha=0.8, size=0.6 , inherit.aes = FALSE )  +
+  geom_text(data=base_data, aes(x = title, y = -18, label=clust), hjust=c(1,1,0,0), colour = "black", alpha=0.8, size=4, fontface="bold", inherit.aes = FALSE)
+ 
+p
+```
+
+
+
+```{r}
+library(ggplot2)
+library(viridis)
+library(tidyverse)
+
+# Create dataset
+data <- data.frame(
+  individual=paste( "Mister ", seq(1,60), sep=""),
+  group=c( rep('Group A', 10), rep('Group B', 30), rep('Group C', 14), rep('Group D', 6)) ,
+  value=sample( seq(10,100), 60, replace=T), stringsAsFactors = TRUE) 
+
+
+# Set a number of 'empty bar' to add at the end of each group
+empty_bar <- 3
+to_add <- data.frame( matrix(NA, empty_bar*nlevels(data$group), ncol(data)) )
+colnames(to_add) <- colnames(data)
+to_add$group <- rep(levels(data$group), each=empty_bar)
+data <- rbind(data, to_add)
+data <- data %>% arrange(group)
+data$id <- seq(1, nrow(data))
+
+# Get the name and the y position of each label
+label_data <- data
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (label_data$id-0.5) /number_of_bar 
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+
+# prepare a data frame for base lines
+base_data <- data %>% 
+  group_by(group) %>% 
+  summarise(start=min(id), end=max(id) - empty_bar) %>% 
+  rowwise() %>% 
+  mutate(title=mean(c(start, end)))
+
+
+angle <- 90 - 360 * (base_data$title-0.5)/number_of_bar  
+base_data$angle <- ifelse(angle < -90, angle+180, angle)
+
+# prepare a data frame for grid (scales)
+grid_data <- base_data
+grid_data$end <- grid_data$end[ c( nrow(grid_data), 1:nrow(grid_data)-1)] + 1
+grid_data$start <- grid_data$start - 1
+grid_data <- grid_data[-1,]
+
+# Make the plot
+ggplot(data, aes(x=as.factor(id), y=value, fill=group)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+
+  geom_bar(aes(x=as.factor(id), y=value, fill=group), stat="identity", alpha=0.5) +
+
+# Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
+  geom_segment(data=grid_data, aes(x = end, y = 80, xend = start, yend = 80), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 60, xend = start, yend = 60), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 40, xend = start, yend = 40), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 20, xend = start, yend = 20), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+
+  # Add text showing the value of each 100/75/50/25 lines
+  annotate("text", x = rep(max(data$id),4), y = c(20, 40, 60, 80), label = c("20%", "40%", "60%", "80%") , color="grey", size=3 , angle=0, fontface="bold", hjust=1, vjust=0) +
+
+  geom_bar(aes(x=as.factor(id), y=value, fill=group), stat="identity", alpha=0.5) +
+  ylim(-50,120) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+#    plot.margin = unit(rep(-1,4), "cm") 
+  ) +
+
+  coord_polar() + 
+  geom_text(data=label_data, aes(x=id, y=value+10, label=individual, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=2.5, angle= label_data$angle, inherit.aes = FALSE ) +
+
+# Add base line information
+geom_segment(data=base_data, aes(x = start, y = -1, xend = end, yend = -1), colour = "black", alpha=0.6, size=0.8, inherit.aes = F ) +
+geom_text(data=base_data, aes(x = title, y = -6, label=group, angle=angle), 
+            hjust=c(1,1,0,0), colour = "black", alpha=0.7, size=2, fontface="bold", inherit.aes = FALSE)
+
+
+```
+
+
+#Genre_1
+
+```{r}
+
+data_genre_1 <- data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>%
+  group_by(clust, genre_1) %>% 
+  summarise(count=n()) %>% 
+  mutate(percent = count*100/sum(count)) %>% 
+  filter(percent>0.05) %>% 
+  arrange(clust, percent) 
+
+
+# Set a number of 'empty bar' to add at the end of each group
+empty_bar <- 3
+to_add <- data.frame( matrix(NA, empty_bar*nlevels(data_genre_1$clust), ncol(data_genre_1)) )
+colnames(to_add) <- colnames(data_genre_1)
+to_add$clust <- rep(levels(data_genre_1$clust), each=empty_bar)
+data <- rbind(data_genre_1, to_add)
+data <- data %>% arrange(clust)
+data$id <- seq(1, nrow(data))
+
+# Get the name and the y position of each label
+label_data <- data
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (label_data$id-0.5) /number_of_bar 
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+
+# prepare a data frame for base lines
+base_data <- data %>% 
+  group_by(clust) %>% 
+  summarise(start=min(id), end=max(id) - empty_bar) %>% 
+  rowwise() %>% 
+  mutate(title=mean(c(start, end)))
+
+
+
+angle <- 90 - 360 * (base_data$title-0.5)/number_of_bar  
+base_data$angle <- ifelse(angle < -90, angle+180, angle)
+
+
+# prepare a data frame for grid (scales)
+grid_data <- base_data
+grid_data$end <- grid_data$end[ c( nrow(grid_data), 1:nrow(grid_data)-1)] + 1
+grid_data$start <- grid_data$start - 1
+grid_data <- grid_data[-1,]
+
+# Make the plot
+# Order data:
+
+
+ggplot(data, aes(x=as.factor(id), y=value, fill=clust)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+
+  geom_bar(aes(x=as.factor(id), y=percent, fill=clust), stat="identity", alpha=0.5) +
+
+# Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
+  geom_segment(data=grid_data, aes(x = end, y = 80, xend = start, yend = 80), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 60, xend = start, yend = 60), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 40, xend = start, yend = 40), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 20, xend = start, yend = 20), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+
+  # Add text showing the percent of each 100/75/50/25 lines
+  annotate("text", x = rep(max(data$id),4), y = c(20, 40, 60, 80), label = c("20%", "40%", "60%", "80%") , color="grey", size=3 , angle=0, fontface="bold", hjust=1, vjust=0) +
+
+  geom_bar(aes(x=as.factor(id), y=percent, fill=clust), stat="identity", alpha=0.5) +
+  ylim(-150, max(label_data$percent, na.rm=T)+10) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+#    plot.margin = unit(rep(-1,4), "cm") 
+  ) +
+
+  coord_polar() + 
+  geom_text(data=label_data, aes(x=id, y=percent+10, label=genre_1), color="black", fontface="bold",alpha=0.6, size=3.5, angle= label_data$angle, hjust=label_data$hjust , inherit.aes = FALSE ) +
+
+# Add base line information
+geom_segment(data=base_data, aes(x = start, y = -1, xend = end, yend = -1), colour = "black", alpha=0.6, size=0.8, inherit.aes = F ) +
+  
+geom_text(data=base_data, aes(x = title, 
+                              y = -6, 
+                              label=c("cluster 1",
+                                      "cluster 2",
+                                      "cluster 3",
+                                      "cluster 4",
+                                      "cluster 5",
+                                      "cluster 6",
+                                      "cluster 7",
+                                      "cluster 8",
+                                      "cluster 9")), 
+            hjust=c(0.25,1,1,1.25,0,0,0,0,0.7), vjust=c(1,1,1,0.24,0,0,0,0,1), colour = "black", alpha=0.7, size=4, fontface="bold", inherit.aes = FALSE)
+
+```
+
+# Mood_1
+```{r}
+data_mood_1 <- data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>%
+  group_by(clust, mood_1) %>% 
+  summarise(count=n()) %>% 
+  mutate(percent = count*100/sum(count)) %>% 
+  filter(percent>0.05) %>% 
+  arrange(clust, percent) 
+
+
+# Set a number of 'empty bar' to add at the end of each group
+empty_bar <- 3
+to_add <- data.frame( matrix(NA, empty_bar*nlevels(data_mood_1$clust), ncol(data_mood_1)) )
+colnames(to_add) <- colnames(data_mood_1)
+to_add$clust <- rep(levels(data_mood_1$clust), each=empty_bar)
+data <- rbind(data_mood_1, to_add)
+data <- data %>% arrange(clust)
+data$id <- seq(1, nrow(data))
+
+# Get the name and the y position of each label
+label_data <- data
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (label_data$id-0.5) /number_of_bar 
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+
+# prepare a data frame for base lines
+base_data <- data %>% 
+  group_by(clust) %>% 
+  summarise(start=min(id), end=max(id) - empty_bar) %>% 
+  rowwise() %>% 
+  mutate(title=mean(c(start, end)))
+
+
+
+angle <- 90 - 360 * (base_data$title-0.5)/number_of_bar  
+base_data$angle <- ifelse(angle < -90, angle+180, angle)
+
+
+# prepare a data frame for grid (scales)
+grid_data <- base_data
+grid_data$end <- grid_data$end[ c( nrow(grid_data), 1:nrow(grid_data)-1)] + 1
+grid_data$start <- grid_data$start - 1
+grid_data <- grid_data[-1,]
+
+# Make the plot
+# Order data:
+
+
+ggplot(data, aes(x=as.factor(id), y=value, fill=clust)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+
+  geom_bar(aes(x=as.factor(id), y=percent, fill=clust), stat="identity", alpha=0.5) +
+
+# Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
+  geom_segment(data=grid_data, aes(x = end, y = 80, xend = start, yend = 80), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 60, xend = start, yend = 60), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 40, xend = start, yend = 40), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 20, xend = start, yend = 20), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+
+  # Add text showing the percent of each 100/75/50/25 lines
+  annotate("text", x = rep(max(data$id),4), y = c(20, 40, 60, 80), label = c("20%", "40%", "60%", "80%") , color="grey", size=3 , angle=0, fontface="bold", hjust=1, vjust=0) +
+
+  geom_bar(aes(x=as.factor(id), y=percent, fill=clust), stat="identity", alpha=0.5) +
+  ylim(-150, max(label_data$percent, na.rm=T)+10) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+#    plot.margin = unit(rep(-1,4), "cm") 
+  ) +
+
+  coord_polar() + 
+  geom_text(data=label_data, aes(x=id, y=percent+10, label=mood_1), color="black", fontface="bold",alpha=0.6, size=3.5, angle= label_data$angle, hjust=label_data$hjust , inherit.aes = FALSE ) +
+
+# Add base line information
+geom_segment(data=base_data, aes(x = start, y = -1, xend = end, yend = -1), colour = "black", alpha=0.6, size=0.8, inherit.aes = F ) +
+  
+geom_text(data=base_data, aes(x = title, 
+                              y = -6, 
+                              label=c("cluster 1",
+                                      "cluster 2",
+                                      "cluster 3",
+                                      "cluster 4",
+                                      "cluster 5",
+                                      "cluster 6",
+                                      "cluster 7",
+                                      "cluster 8",
+                                      "cluster 9")), 
+            hjust=c(0.25,1,1,0.7,0,0,0,0,0.7), vjust=c(1,1,1,0,0,0,0,0,1), colour = "black", alpha=0.7, size=4, fontface="bold", inherit.aes = FALSE)
+
+```
+
 
 
