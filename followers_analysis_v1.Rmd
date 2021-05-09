@@ -533,6 +533,54 @@ data_cleaned_clusterized %>%
                height = 7, 
                width = 10)
 
+
+#number of tokens 
+data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>% 
+  ggbetweenstats(
+  x = clust,
+  y = tokens_count,
+  title = "Distribution of the #tokens across clusters",
+  palette = "Paired" 
+) + 
+  scale_y_continuous(limits = c(0,50)) + 
+  ggsave(here('data/exploratory','cluster_tokens_count_certain.png'),
+               height = 7, 
+               width = 10)
+
+#number of skippers
+data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>% 
+  ggbetweenstats(
+  x = clust,
+  y = skippers,
+  title = "Distribution of the #skippers across clusters",
+  palette = "Paired" 
+) + 
+  scale_y_continuous(limits = c(0,34200)) + 
+  ggsave(here('data/exploratory','cluster_skippers_certain.png'),
+               height = 7, 
+               width = 10)
+
+# AVE SENTIMENT
+data_cleaned_clusterized %>% 
+  filter(uncertainty<0.3) %>% 
+  ggbetweenstats(
+  x = clust,
+  y = ave_sentiment,
+  title = "Distribution of the avg sentiment across clusters",
+  palette = "Paired" 
+) + 
+  scale_y_continuous(limits = c(-2.2,2.2)) + 
+  ggsave(here('data/exploratory','cluster_avg_sentiment_certain.png'),
+               height = 7, 
+               width = 10)
+
+
+
+
+
+
 data_genre_1 <- data_cleaned_clusterized %>% 
   filter(uncertainty<0.3) %>%
   group_by(clust, genre_1) %>% 
