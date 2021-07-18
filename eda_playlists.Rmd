@@ -20,6 +20,21 @@ library(ggjoy)
 library(ggExtra)
 library(funModeling)
 library(purrr)
+library(extrafont)
+
+library(showtext)
+## Loading Google fonts (https://fonts.google.com/)
+font_add_google("Gochi Hand", "gochi")
+font_add_google("Schoolbell", "bell")
+font_add_google("Covered By Your Grace", "grace")
+font_add_google("Rock Salt", "rock")
+font_add_google("Montserrat", "Montserrat")
+
+## Automatically use showtext to render text for future devices
+showtext_auto()
+## Tell showtext the resolution of the device,
+## only needed for bitmap graphics. Default is 96
+showtext_opts(dpi = 96)
 ```
 
 
@@ -32,7 +47,7 @@ When you click the **Knit** button a document will be generated that includes bo
 ```{r read data}
 data <- read_csv(here('data','playlists_data.csv'))
 
-summary(data) %>% 
+summary(data) ##%>% 
 ```
 Profiling Numerical Variables
 
@@ -165,8 +180,9 @@ data_numeric%>%
   scale_y_continuous(expand = expansion(mult = c(0,0)),
                      limits = c(0,150000),
                      breaks = seq(0,150000,20000))+
-  labs(y = "Number of Playlists", 
-       x="Monthly streams >30s of followers")+
+  labs(face="bold",
+       y = "Number of Playlists", 
+       x="Monthly streams >30s of followers")+ 
   theme_minimal()+
   theme(
   axis.text.x = element_text(size = 8),
@@ -184,12 +200,28 @@ data_numeric%>%
                      breaks = seq(0,300,10)
                      )+
   scale_y_continuous(labels = scales::percent)+
-  labs(y = "Number of Playlists", 
-       x="Monthly streams >30s of followers")+
+  labs(face='bold',
+       color='black',
+       size=14,
+       y = "Percentage of Playlists", 
+       x="Monthly streams >30s followers")+
   theme_minimal()+
   theme(
-  axis.text.x = element_text(size = 8),
-  axis.title.y = element_text(size = 10))
+  axis.text.x = element_text(family='Montserrat',face= "bold",size = 8),
+  axis.text.y = element_text(family='Montserrat',face= "bold",size = 8),
+   # Remove panel border
+  panel.border = element_blank(),  
+  # Remove panel grid lines
+  #panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  # Remove panel background
+  panel.background = element_blank(),
+  # Add axis line
+  axis.line = element_line(colour = "grey"))+
+  ggsave(here('eda_graphs/',paste('pct_monthly_streams','.png')),
+               height = 2, 
+               width = 7,
+         device = "png")
 ```
 
 
@@ -208,19 +240,71 @@ data_numeric%>%
                      labels = seq(0,50,3)
                      )+
   scale_y_continuous(labels = scales::percent)+
-  labs(y = "Number of Playlists", 
+  labs(y = "Percentage of Playlists", 
        x="MAU")+
   theme_minimal()+
   theme(
-  axis.text.x = element_text(size = 8),
-  axis.title.y = element_text(size = 10))
+  axis.text.x = element_text(family='Montserrat',face= "bold", size = 8),
+  axis.text.y = element_text(family='Montserrat',face= "bold", size = 8),
+  # Remove panel border
+  panel.border = element_blank(),  
+  # Remove panel grid lines
+  #panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  # Remove panel background
+  panel.background = element_blank(),
+  # Add axis line
+  axis.line = element_line(colour = "grey"))+
+  ggsave(here('eda_graphs/',paste('pct_mau','.png')),
+               height = 2, 
+               width = 7,
+         device = "png")
 
 
 data_numeric%>% 
   filter(mau<3)%>%
   summarise(count_percent = (n()/403366)*100,
-            n())
+            n()) 
+  
 ```
+
+
+```{r}
+data_numeric %>% 
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s) %>%
+  top_n(15, monthly_stream30_followers) %>% 
+  arrange(desc(monthly_stream30_followers)) %>% 
+  mutate(ranking = row_number()) %>%
+  ggplot(aes(y=mau, x=as.factor(ranking))) +
+  geom_bar(stat = "identity",color="black", fill="#20D760") +
+  geom_hline(aes(yintercept=200000), colour="#990000", linetype="dashed")+
+  labs(y = "MAU", 
+       x="Top 15 playlists with more monthly streams")+
+  scale_y_continuous(breaks = seq(0,2000000,200000),
+                     labels = scales::comma) +
+  theme_minimal()+
+  theme(
+  axis.text.x = element_text(family='Montserrat', face= "bold",size = 8),
+  axis.text.y = element_text(family='Montserrat', face= "bold", size = 8),
+  # Remove panel border
+  panel.border = element_blank(),  
+  # Remove panel grid lines
+  #panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  # Remove panel background
+  panel.background = element_blank(),
+  # Add axis line
+  axis.line = element_line(colour = "grey")) + 
+  ggsave(here('eda_graphs/',paste('ranked_monthly streams','.png')),
+               height = 2, 
+               width = 7,
+         device = "png")
+  
+  
+    
+```
+
+
 
 Let's apply PCA! 
 

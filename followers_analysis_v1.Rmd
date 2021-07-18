@@ -27,6 +27,8 @@ library(purrr)
 library(skimr)
 library(sentimentr)
 library(stringr) 
+library(embed)
+library(recipes)
 
 ```
 
@@ -100,6 +102,314 @@ data %>%
   geom_jitter(width = 0.1, size = 1)
 ```
 
+#Word Sentiment analysis
+```{r}
+data_sentiment <- data %>% 
+  rowwise() %>%
+  mutate(ratio_owner_streams = monthly_owner_stream30s/monthly_stream30s,
+    number_genres = sum(c_across(genre_1:genre_3) != "-"),
+       number_moods =  sum(c_across(mood_1:mood_3) != "-")) %>%
+  ungroup() %>% 
+  select(playlist_uri, monthly_stream30s, monthly_owner_stream30s, ratio_owner_streams, number_genres, number_moods,tokens) 
+
+
+sentences <-  get_sentences(gsub('\\d|\U{FFFFFFFF}|\U3e33613c|\U3e63613c|\\[|\\]|\u00f1a', '',  enc2utf8(data_sentiment$tokens)))
+sentiments <- sentiment_by(sentences, list(data_sentiment$playlist_uri, enc2utf8(data_sentiment$tokens))) 
+
+sentiments_idx <- sentiments %>% 
+  rename(tokens_count = word_count) %>%
+  select(-`tokens)`, -sd)
+
+data_cleaned <-
+inner_join(sentiments_idx, data_sentiment, by='playlist_uri') %>% 
+  mutate_if(is.character, factor)
+
+data_cleaned  %>% 
+  select(playlist_uri, tokens, ave_sentiment) %>% 
+  arrange(desc(ave_sentiment)) %>% 
+  tail(n=10) %>%
+  arrange(ave_sentiment) %>%
+  rename('Playlist ID' = playlist_uri,
+         'Tokens' = tokens,
+         'Avg. Sentiment Score'= ave_sentiment) %>%  View()
+  
+
+```
+
+
+Let's do some local regressions with the sentiment scores
+
+
+
+```{r}
+
+#SAMPLEANDO 
+set.seed(1)
+df_sampled <- data_cleaned %>%
+  sample_n(size=4118)
+
+
+df_sampled %>% 
+  ggplot(aes(x=ave_sentiment, y=monthly_owner_stream30s)) +
+  geom_point(alpha = 0.8,size = 0.3, color='#20D760')+
+  geom_smooth(method='loess',se=TRUE, color="#883149")+
+  labs(y="Monthly Owner Streams >30s",
+       x="Playlist Token Avg. Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(family='Montserrat',face= "bold",size = 8),
+        axis.text.y = element_text(family='Montserrat',face= "bold",size = 8),
+         # Remove panel border
+        panel.border = element_blank(),  
+        # Remove panel grid lines
+        #panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        # Remove panel background
+        panel.background = element_blank(),
+        # Add axis line
+        axis.line = element_line(colour = "grey"),
+        legend.position="none")+
+  scale_y_continuous(limits = c(0, 400), breaks = seq(0, 400, by = 50))+
+  scale_x_continuous(limits = c(-1.5,1.5))+
+  ggsave(here('eda_graphs/',paste('owner_streamsVSsentiment_score','.png')),
+               height = 4, 
+               width = 5,
+         device = "png")
+```
+
+# affecting the listeners
+```{r}
+
+df_sampled %>% 
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s) %>% 
+  ggplot(aes(x=ave_sentiment, y=monthly_stream30_followers)) +
+  geom_point(alpha = 0.8,size = 0.3, color='#20D760')+
+  geom_smooth(method='loess',se=TRUE, color="#883149")+
+  labs(y="Monthly Listeners Streams >30s",
+       x="Playlist Token Avg. Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(family='Montserrat',face= "bold",size = 8),
+        axis.text.y = element_text(family='Montserrat',face= "bold",size = 8),
+         # Remove panel border
+        panel.border = element_blank(),  
+        # Remove panel grid lines
+        #panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        # Remove panel background
+        panel.background = element_blank(),
+        # Add axis line
+        axis.line = element_line(colour = "grey"),
+        legend.position="none")+
+  scale_y_continuous(limits = c(0, 400), breaks = seq(0, 400, by = 50))+
+  scale_x_continuous(limits = c(-1.5,1.5))+
+  ggsave(here('eda_graphs/',paste('listeners_streamsVSsentiment_score','.png')),
+               height = 4, 
+               width = 5,
+         device = "png")
+
+
+
+```
+
+
+#Visualizing lead genres and moods
+```{r}
+# Plot lead_genre
+data %>% group_by(genre_1) %>% 
+  summarise(count=n()) %>% 
+  mutate(percent = count/sum(count)) %>% 
+  arrange(percent, genre_1) %>% 
+  mutate(genre_1=factor(genre_1, levels=genre_1)) %>%   # This trick update the factor levels
+  ggplot(aes(x=percent, y=genre_1)) +
+    geom_segment(aes(x=0, xend=percent, y=genre_1, yend=genre_1), color="#20D760") +
+    geom_point(color = "#20D760")  +
+    labs(x="Percentage of playlists", 
+         y="Lead Genre") + 
+    theme_minimal() +
+    theme(axis.text.x = element_text(family='Montserrat',color='black',size = 8),
+        axis.text.y = element_text(family='Montserrat',color='black',size = 8),
+         # Remove panel border
+        panel.border = element_blank(),  
+        # Remove panel grid lines
+        #panel.grid.major = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        # Remove panel background
+        panel.background = element_blank(),
+        # Add axis line
+        axis.line = element_line(colour = "grey"),
+        legend.position="none")+
+        scale_x_continuous(expand = expansion(mult = c(0,0)),
+                           limits=c(0,0.19),
+                           labels = scales::percent_format(accuracy = 1L))+
+        ggsave(here('eda_graphs/',paste0('lead_genre_ratio','.png')),
+               height = 5, 
+               width = 3,
+         device = "png")
+# Plot lead_mood
+data %>% group_by(mood_1) %>% 
+  summarise(count=n()) %>% 
+  mutate(percent = count/sum(count)) %>% 
+  arrange(percent, mood_1) %>% 
+  mutate(mood_1=factor(mood_1, levels=mood_1)) %>%   # This trick update the factor levels
+  ggplot(aes(x=percent, y=mood_1)) +
+    geom_segment(aes(x=0, xend=percent, y=mood_1, yend=mood_1), color="#20D760") +
+    geom_point(color = "#20D760")  +
+    labs(x="Percentage of playlists", 
+         y="Lead Mood") + 
+    theme_minimal() +
+    theme(axis.text.x = element_text(family='Montserrat',size = 8, color='black'),
+        axis.text.y = element_text(family='Montserrat',size = 8,color='black'),
+         # Remove panel border
+        panel.border = element_blank(),  
+        # Remove panel grid lines
+        #panel.grid.major = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        # Remove panel background
+        panel.background = element_blank(),
+        # Add axis line
+        axis.line = element_line(colour = "grey"),
+        legend.position="none")+
+        scale_x_continuous(expand = expansion(mult = c(0,0)),
+                           limits=c(0,0.22),
+                           labels = scales::percent_format(accuracy = 1L))+
+        ggsave(here('eda_graphs/',paste0('lead_mood_ratio','.png')),
+               height = 5, 
+               width = 3,
+         device = "png")
+
+
+
+```
+
+#Let's check the monthly streams from followers by mood and genre
+
+```{r}
+colourCount_genre_1 = length(unique(data_cleaned$genre_1))
+colourCount_mood_1 = length(unique(data_cleaned$mood_1))
+
+p1 <- data_cleaned %>% 
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s) %>% 
+  select(monthly_stream30_followers, genre_1) %>% 
+  ggbetweenstats(
+  x = genre_1,
+  y = monthly_stream30_followers,
+  xlab = "Lead Genre", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  ggplot.component =
+    # modify further with `ggplot2` functions
+  list(
+    scale_color_manual(values = paletteer::paletteer_c("ggthemes::Green-Blue Diverging",colourCount_genre_1)),
+    theme(axis.text.x = element_text(angle = 90)))
+  ) + 
+  scale_y_continuous(limits = c(0,5000)) 
+
+p2 <- data_cleaned %>% 
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s) %>% 
+  select(monthly_stream30_followers, mood_1) %>% 
+  ggbetweenstats(
+  x = mood_1,
+  y = monthly_stream30_followers,
+  xlab = "Lead Mood", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  ggplot.component =
+    # modify further with `ggplot2` functions
+  list(
+    scale_color_manual(values = paletteer::paletteer_c("ggthemes::Green-Blue Diverging",colourCount_mood_1)),
+    theme(axis.text.x = element_text(angle = 90)))
+  ) + 
+  scale_y_continuous(limits = c(0,5000)) 
+
+ggstatsplot::combine_plots(
+  list(p1, p2),
+  plotgrid.args = list(nrow = 2),
+  annotation.args = list(
+    title = "Distribution of the monthly listeners streams >30s across genre and mood categories"
+  )
+)+ ggsave(here('eda_graphs/',paste0('lead_mood_genre_monthlystreams_listenters','.png')),
+               height = 10, 
+               width = 15,
+         device = "png")
+ 
+ 
+  
+  
+  
+```
+
+  
+```{r}
+colourCount_genre_1 = length(unique(data$genre_1))
+colourCount_mood_1 = length(unique(data$mood_1))
+
+p1 <- data %>% 
+  select(monthly_owner_stream30s, genre_1) %>% 
+  ggbetweenstats(
+  x = genre_1,
+  y = monthly_owner_stream30s,
+  xlab = "Lead Genre", # label for the x-axis
+  ylab = "Monthly Owner Streams >30s", # label for the y-axis
+  title = "",
+  ggplot.component =
+    # modify further with `ggplot2` functions
+  list(
+    scale_color_manual(values = paletteer::paletteer_c("ggthemes::Green-Blue Diverging",colourCount_genre_1)),
+    theme(axis.text.x = element_text(angle = 90)))
+  ) + 
+  scale_y_continuous(limits = c(0,26000)) 
+
+p2 <- data %>% 
+select(monthly_owner_stream30s, mood_1) %>% 
+  ggbetweenstats(
+  x = mood_1,
+  y = monthly_owner_stream30s,
+  xlab = "Lead Mood", # label for the x-axis
+  ylab = "Monthly Owner Streams >30s", # label for the y-axis
+  title = "",
+  ggplot.component =
+    # modify further with `ggplot2` functions
+  list(
+    scale_color_manual(values = paletteer::paletteer_c("ggthemes::Green-Blue Diverging",colourCount_mood_1)),
+    theme(axis.text.x = element_text(angle = 90)))
+  ) + 
+  scale_y_continuous(limits = c(0,26000)) 
+
+ggstatsplot::combine_plots(
+  list(p1, p2),
+  plotgrid.args = list(nrow = 2),
+  annotation.args = list(
+    title = "Distribution of the monthly owner streams >30s across genre and mood categories"
+  )
+)+ ggsave(here('eda_graphs/',paste0('lead_mood_genre_monthlystreams_owners','.png')),
+               height = 10, 
+               width = 15,
+         device = "png")
+```
+  
+#Checking the monthly streams data points distributions
+
+```{r}
+data %>%
+  mutate(monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s,
+         creator = case_when(owner=='spotify' ~ 'Spotify',
+                             owner!='spotify' ~ 'Independent User')) %>% 
+select(creator, monthly_stream30_followers) %>% 
+ggplot(aes(x=creator, y=monthly_stream30_followers))+
+  geom_jitter(position = position_jitter(height = .2, width = .2), alpha = .7, colour='#20D760')+
+  labs(x="", 
+      y="") + 
+  scale_y_continuous(name="Monthly Listeners Streams >30s", labels = scales::comma_format())+
+  theme(axis.text.x = element_text(family='Montserrat',face= "bold",size = 8, color='black'),
+        axis.text.y = element_text(family='Montserrat',face= "bold",size = 8, color='black'))+
+  theme_minimal() +
+  ggsave(here('eda_graphs/',paste0('monthly_jitter_creators','.png')),
+               height = 6, 
+               width = 4,
+         device = "png")
+  
+```
 
 #Feature Engineering: preparing the data
 Let's work on Long Term Successes: MAU
@@ -135,6 +445,300 @@ inner_join(sentiments_idx, data_long_term, by='playlist_uri') %>%
   
 ```
 
+#Local Regression with the number of genres
+```{r}
+
+#SAMPLEANDO 
+set.seed(1234)
+df_sampled <- data_cleaned %>%
+  sample_n(size=3999)
+
+data_cleaned %>% 
+  # create ordered factor to allow synchronized order of x after as.numeric
+  mutate(number_genres = factor(number_genres, ordered = T, c("0", "1", "2", "3")),
+         monthly_stream30_followers=monthly_stream30s-monthly_owner_stream30s) %>% 
+  ggplot(aes(x=number_genres, y=monthly_stream30_followers)) +
+  geom_point(alpha = 0.8,size = 1, color='#20D760')+
+  geom_smooth(aes(as.numeric(number_genres), monthly_stream30_followers), method = "loess", se=TRUE, color="#883149")+
+  labs(y="Monthly Owner Streams >30s",
+       x="Number of genres") +
+  scale_y_continuous(limits = c(0,400)) +
+  theme_minimal() +
+  ggsave(here('eda_graphs/',paste0('nmr_genres_monthly_streams','.png')),
+               height = 6, 
+               width = 5,
+         device = "png")
+
+
+
+```
+
+#ggbetweenstats for number of genres and number of moods
+
+```{r}
+
+library(ggstatsplot)
+
+
+p1 <- data_cleaned %>% 
+  mutate(number_genres = factor(number_genres, ordered = T, c("0", "1", "2", "3"))) %>% 
+  ggbetweenstats(
+  x = number_genres,
+  y = monthly_stream30_followers,
+  xlab = "Number of Genres", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  ggplot.component =
+    # modify further with `ggplot2` functions
+  list(scale_color_manual(values = paletteer::paletteer_c("ggthemes::Green-Blue Diverging",4)))) + 
+  scale_y_continuous(limits = c(0,5000),
+                     labels = scales::comma_format())
+
+  
+  p2 <- data_cleaned %>% 
+  mutate(number_moods = factor(number_moods, ordered = T, c("0", "1", "2", "3"))) %>% 
+  ggbetweenstats(
+  x = number_moods,
+  y = monthly_stream30_followers,
+  xlab = "Number of Moods", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  ggplot.component =
+    # modify further with `ggplot2` functions
+  list(scale_color_manual(values = paletteer::paletteer_c("ggthemes::Green-Blue Diverging",4)))) + 
+  scale_y_continuous(limits = c(0,5000),
+                     labels = scales::comma_format())
+  
+  ggstatsplot::combine_plots(
+    list(p1, p2),
+    plotgrid.args = list(nrow = 1),
+    annotation.args = list(
+      title = ""
+    )
+  )+ ggsave(here('eda_graphs/',paste0('nmr_moods_genres_monthlystreams','.png')),
+                 height = 8, 
+                 width = 12,
+           device = "png")
+ 
+
+
+```
+
+#scatterplots artists, tracks, albums
+```{r}
+
+##############################
+# TRACKS
+##############################
+
+png(here('eda_graphs/',paste0('scatter_tracks_monthly_listeners','.png')), 
+     width= 7, 
+     height= 5, 
+     units="in", 
+     res=300)
+
+data_cleaned %>% 
+  ggscatterstats(
+  x = n_tracks,
+  y = monthly_stream30_followers,
+  xlab = "Number of Tracks", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  marginal = FALSE,
+  point.args = list(size = .7, 
+                    alpha = 0.4, 
+                    colour='#20D760'),
+  smooth.line.args = list(size = 0.6, 
+                          color = "#883149",
+                          se=TRUE),
+  ggplot.component = list( scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
+                                         labels = scales::trans_format("log10", scales::math_format(10^.x))),
+                           scale_y_log10(limits = c(10^0,10^7),
+                                         breaks = scales::trans_breaks("log10", function(x) 10^x),
+                                         labels = scales::trans_format("log10", scales::math_format(10^.x))),
+                                        annotation_logticks()))
+  
+
+# Close device
+dev.off()
+
+##############################
+# Artists
+##############################
+
+
+png(here('eda_graphs/',paste0('scatter_artists_monthly_listeners','.png')), 
+     width= 7, 
+     height= 5, 
+     units="in", 
+     res=300)
+
+data_cleaned %>% 
+  ggscatterstats(
+  x = n_artists,
+  y = monthly_stream30_followers,
+  xlab = "Number of Artists", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  marginal = FALSE,
+  point.args = list(size = .7, 
+                    alpha = 0.4, 
+                    colour='#20D760'),
+  smooth.line.args = list(size = 0.6, 
+                          color = "#883149",
+                          se=TRUE),
+  ggplot.component = list( scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
+                                         labels = scales::trans_format("log10", scales::math_format(10^.x))),
+                           scale_y_log10(limits = c(10^0,10^7),
+                                         breaks = scales::trans_breaks("log10", function(x) 10^x),
+                                         labels = scales::trans_format("log10", scales::math_format(10^.x))),
+                                        annotation_logticks()))
+  
+
+# Close device
+dev.off()
+
+
+##############################
+# Albums
+##############################
+
+png(here('eda_graphs/',paste0('scatter_albums_monthly_listeners','.png')), 
+     width= 7, 
+     height= 5, 
+     units="in", 
+     res=300)
+
+data_cleaned %>% 
+  ggscatterstats(
+  x = n_albums,
+  y = monthly_stream30_followers,
+  xlab = "Number of Albums", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  marginal = FALSE,
+  point.args = list(size = .7, 
+                    alpha = 0.4, 
+                    colour='#20D760'),
+  smooth.line.args = list(size = 0.6, 
+                          color = "#883149",
+                          se=TRUE),
+  ggplot.component = list( scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
+                                         labels = scales::trans_format("log10", scales::math_format(10^.x))),
+                           scale_y_log10(limits = c(10^0,10^7),
+                                         breaks = scales::trans_breaks("log10", function(x) 10^x),
+                                         labels = scales::trans_format("log10", scales::math_format(10^.x))),
+                                        annotation_logticks()))
+   + ggsave(here('eda_graphs/',paste0('test_graph','.png')),
+               height = 7, 
+               width = 5,
+         device = "png")
+# Close device
+dev.off()
+
+##############################
+# tokens count
+##############################
+png(here('eda_graphs/',paste0('scatter_tokens_monthly_listeners','.png')), 
+     width= 7, 
+     height= 5, 
+     units="in", 
+     res=300)
+
+data_cleaned %>% 
+  ggscatterstats(
+  x = tokens_count,
+  y = monthly_stream30_followers,
+  xlab = "Number of Tokens", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  marginal = FALSE,
+  point.args = list(size = .7, 
+                    alpha = 0.4, 
+                    colour='#20D760'),
+  smooth.line.args = list(size = 0.6, 
+                          color = "#883149",
+                          se=TRUE),
+  ggplot.component = list( scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
+                                         labels = scales::trans_format("log10", scales::math_format(10^.x))),
+                           scale_y_log10(limits = c(10^0,10^7),
+                                         breaks = scales::trans_breaks("log10", function(x) 10^x),
+                                         labels = scales::trans_format("log10", scales::math_format(10^.x))),
+                                        annotation_logticks()))
+# Close device
+dev.off()
+
+```
+
+
+#checking minthly streams per category genre and mood
+
+```{r}
+#SAMPLEANDO 
+set.seed(1)
+df_sampled <- data_cleaned %>%
+  sample_n(size=3999)
+
+
+colourCount_genre_1 = length(unique(df_sampled$genre_1))
+colourCount_mood_1 = length(unique(data_cleaned$mood_1))
+
+df_sampled %>% 
+  select(monthly_stream30_followers, genre_1) %>% 
+  group_by(genre_1) %>%
+  summarise(max = max(monthly_stream30_followers, na.rm=TRUE),
+            min= min(monthly_stream30_followers, na.rm=TRUE)) %>%  View()
+    
+
+data_cleaned %>% 
+  select(monthly_stream30_followers, genre_1) %>% 
+  ggbetweenstats(
+  x = genre_1,
+  y = monthly_stream30_followers,
+  xlab = "Lead Genre", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  ggplot.component =
+    # modify further with `ggplot2` functions
+  list(
+    scale_color_manual(values = paletteer::paletteer_c("ggthemes::Green-Blue Diverging",colourCount_genre_1)),
+    theme(axis.text.x = element_text(angle = 0)))
+  ) + 
+  scale_y_continuous(limits = c(0,7500)) +
+  scale_x_discrete(guide=guide_axis(n.dodge=2))+
+  ggsave(here('eda_graphs/',paste0('lead_genre_monthlystreams_listenters','.png')),
+               height = 8, 
+               width = 12,
+         device = "png")
+
+data_cleaned %>% 
+  select(monthly_stream30_followers, mood_1) %>% 
+  ggbetweenstats(
+  x = mood_1,
+  y = monthly_stream30_followers,
+  xlab = "Lead Mood", # label for the x-axis
+  ylab = "Monthly Listeners Streams >30s", # label for the y-axis
+  title = "",
+  ggplot.component =
+    # modify further with `ggplot2` functions
+  list(
+    scale_color_manual(values = paletteer::paletteer_c("ggthemes::Green-Blue Diverging",colourCount_mood_1)),
+    theme(axis.text.x = element_text(angle = 0)))
+  ) + 
+  scale_y_continuous(limits = c(0,7500)) +
+  scale_x_discrete(guide=guide_axis(n.dodge=2))+
+  ggsave(here('eda_graphs/',paste0('lead_mood_monthlystreams_listenters','.png')),
+               height = 8, 
+               width = 12,
+         device = "png")
+
+
+
+
+  
+  
+  
+```
 
 ```{r}
 data_cleaned %>% 
